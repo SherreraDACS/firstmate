@@ -128,7 +128,23 @@ test_supervision_instructions_for_agy() {
   assert_contains "$repair" "repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh" \
     "agy repair line was not the foreground checkpoint line"
 
-  pass "fm-supervision-instructions.sh: renders AGY supervision protocol and checkpoint repair line"
+  local custom_repair
+  custom_repair=$(FM_AGY_WATCH_CHECKPOINT=99 FM_CODEX_WATCH_CHECKPOINT=42 "$ROOT/bin/fm-supervision-instructions.sh" --harness agy --repair-line)
+  assert_contains "$custom_repair" "--seconds 99." \
+    "FM_AGY_WATCH_CHECKPOINT did not take precedence over FM_CODEX_WATCH_CHECKPOINT in agy repair line"
+
+  local cfg_dir host_out
+  cfg_dir="$TMP_ROOT/supervision-host-cfg"
+  mkdir -p "$cfg_dir"
+  touch "$cfg_dir/supervision-host"
+  host_out=$(FM_CONFIG_OVERRIDE="$cfg_dir" "$ROOT/bin/fm-supervision-instructions.sh" --harness agy)
+  assert_contains "$host_out" "Supervision host: on" "supervision host was not announced for agy"
+  assert_contains "$host_out" "Every foreground checkpoint runs the supervision host in the watcher's place" \
+    "supervision host snippet did not render checkpoint instruction for agy"
+  assert_contains "$host_out" "Only a wake the host hands back reaches you, as checkpoint output" \
+    "supervision host snippet did not render checkpoint output line for agy"
+
+  pass "fm-supervision-instructions.sh: renders AGY supervision protocol, checkpoint repair line, and supervision-host tags"
 }
 
 test_session_lock_ownership_with_agy() {

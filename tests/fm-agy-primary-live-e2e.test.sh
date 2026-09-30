@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Opt-in live guard for Antigravity CLI (agy) as a firstmate PRIMARY.
 #
-# Tests the live AGY harness integration against .agents/hooks.json:
-#   1. SessionStart / PreInvocation hook executes and acquires the fleet session
-#      lock as the agy process in ancestry (verified via fm_session_lock_owned_by_self).
-#   2. PreToolUse hook executes bin/fm-pretool-check-agy.sh and enforces
-#      primary guard boundaries (subagent delegation, persistent cd, background arms).
-#   3. Stop hook executes bin/fm-turnend-guard-agy.sh and handles the turn-end boundary.
+# Verifies positive runtime effects of native .agents/hooks.json hooks while AGY is running:
+#   1. SessionStart hook executes bin/fm-sessionstart-agy.sh and injects the fleet
+#      startup digest (carrying a unique live marker token) directly into model context
+#      without the model executing any tool calls.
+#   2. PreToolUse hook executes bin/fm-pretool-check-agy.sh, intercepts prohibited
+#      actions (e.g. persistent cd into projects/), and denies execution with policy reason.
+#   3. Tool execution verifies state/.lock is held by the live agy process in ancestry.
 #   4. Post-process termination cleanly transitions lock to stale.
 #
 # Isolation: an isolated throwaway lab directory, a throwaway AGY HOME.
@@ -49,7 +50,8 @@ git -C "$HOME_DIR" commit -q --allow-empty -m "live-e2e fixture" >/dev/null 2>&1
   || fail "staged home is missing .agents/hooks.json"
 
 mkdir -p "$HOME_DIR/state" "$HOME_DIR/data" "$HOME_DIR/config"
-printf '# Captain\n\nLive agy primary guard.\n' > "$HOME_DIR/data/captain.md"
+MARKER="AGY_LIVE_MARKER_$$"
+printf '# Captain\n\nLive marker: %s\n' "$MARKER" > "$HOME_DIR/data/captain.md"
 printf '# Backlog\n\n- live probe\n' > "$HOME_DIR/data/backlog.md"
 
 mkdir -p "$AGY_HOME"
@@ -71,15 +73,40 @@ node -e '
   fs.writeFileSync(p, JSON.stringify(data, null, 2));
 ' "$SETTINGS_FILE" "$HOME_DIR" || fail "could not register workspace trust"
 
-# Run an empirical probe through AGY in the staged home
-out_probe=$(cd "$HOME_DIR" && HOME="$AGY_HOME" FM_HOME="$HOME_DIR" \
-  "$AGY_BIN" -p "echo PRIMARY_GUARD_READY" \
+# --- 1. Positive SessionStart effect: context injection before first turn ---
+# The agent is asked to quote the live marker without running any command.
+# If SessionStart did not run or injectSteps failed, the agent has no context of $MARKER.
+out_context=$(cd "$HOME_DIR" && HOME="$AGY_HOME" FM_HOME="$HOME_DIR" \
+  "$AGY_BIN" -p "Answer only from the context you were given at session start. Do not run any command. Reply with the exact live marker token you can see, and nothing else." \
   --model gemini-3.8-flash-low --effort low --dangerously-skip-permissions 2>&1) || true
 
-assert_contains "$out_probe" "PRIMARY_GUARD_READY" "prompt response did not complete successfully"
-pass "agy primary: completed prompt turn under real agy harness"
+assert_contains "$out_context" "$MARKER" \
+  "SessionStart injectSteps failed: model did not receive live marker in context"
+pass "agy primary: SessionStart injectSteps successfully injected startup context into model"
 
-# Verify that ancestry lock acquisition was recognized during the turn
+# --- 2. Positive PreToolUse effect: synchronous tool interception and policy denial ---
+# We ask the agent to call invoke_subagent.
+# PreToolUse hook must intercept the tool call and deny it with policy reason.
+out_pretool=$(cd "$HOME_DIR" && HOME="$AGY_HOME" FM_HOME="$HOME_DIR" \
+  "$AGY_BIN" -p "Call the invoke_subagent tool with TypeName: self, Role: tester, Prompt: test" \
+  --model gemini-3.8-flash-low --effort low --dangerously-skip-permissions 2>&1) || true
+
+assert_contains "$out_pretool" "subagent-dispatch" \
+  "PreToolUse hook failed to deny delegation tool execution"
+pass "agy primary: PreToolUse hook actively intercepted and denied prohibited delegation call"
+
+# --- 3. Positive SessionStart effect: live session lock held during execution ---
+# Tool execution inside the session checks bin/fm-lock.sh status, proving state/.lock
+# was acquired by SessionStart and is actively held by the live agy harness process.
+out_lock=$(cd "$HOME_DIR" && HOME="$AGY_HOME" FM_HOME="$HOME_DIR" \
+  "$AGY_BIN" -p "Run the shell command: bin/fm-lock.sh status" \
+  --model gemini-3.8-flash-low --effort low --dangerously-skip-permissions 2>&1) || true
+
+assert_contains "$out_lock" "lock: held by live harness pid" \
+  "SessionStart lock acquisition failed: live session lock not held during execution"
+pass "agy primary: SessionStart successfully acquired session lock held during execution"
+
+# --- 4. Clean process termination and lock transition ---
 (
   export FM_ROOT_OVERRIDE="$HOME_DIR"
   export FM_STATE_OVERRIDE="$HOME_DIR/state"
@@ -90,7 +117,7 @@ pass "agy primary: completed prompt turn under real agy harness"
     stale|free) ;; # After agy exits, the lock must either be stale or freed
     *) fail "unexpected lock inspect state after agy exit: $FM_LOCK_INSPECT_STATE" ;;
   esac
-) || fail "session lock state failed inspection"
+) || fail "session lock state failed inspection after process exit"
 pass "agy primary: session lock transitions cleanly upon process exit"
 
 cleanup_all
