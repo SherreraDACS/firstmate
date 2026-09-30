@@ -131,7 +131,12 @@ test_supervision_instructions_for_agy() {
   local custom_repair
   custom_repair=$(FM_AGY_WATCH_CHECKPOINT=99 FM_CODEX_WATCH_CHECKPOINT=42 "$ROOT/bin/fm-supervision-instructions.sh" --harness agy --repair-line)
   assert_contains "$custom_repair" "--seconds 99." \
-    "FM_AGY_WATCH_CHECKPOINT did not take precedence over FM_CODEX_WATCH_CHECKPOINT in agy repair line"
+    "FM_AGY_WATCH_CHECKPOINT was not used in agy repair line"
+
+  local default_repair
+  default_repair=$(FM_CODEX_WATCH_CHECKPOINT=42 "$ROOT/bin/fm-supervision-instructions.sh" --harness agy --repair-line)
+  assert_contains "$default_repair" "--seconds 180." \
+    "FM_CODEX_WATCH_CHECKPOINT leaked into agy repair line when FM_AGY_WATCH_CHECKPOINT was unset"
 
   local cfg_dir host_out
   cfg_dir="$TMP_ROOT/supervision-host-cfg"
@@ -303,11 +308,39 @@ test_turnend_guard_agy_adapter() {
   pass "fm-turnend-guard-agy.sh: allows when safe, compels continuation when blind, bounds loop iterations"
 }
 
+test_supervision_host_afk_refusal_and_quiet_mode_for_agy() {
+  local home="$TMP_ROOT/afk-agy-home"
+  mkdir -p "$home/state" "$home/config"
+
+  daemon_allowed() {  # [mode]
+    FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+      FM_TEST_HARNESS=agy FM_AFK_MODE="${1:-}" \
+      bash -c '. "$1"; fm_afk_launch_primary_harness() { printf "%s" "$FM_TEST_HARNESS"; }; fm_afk_launch_daemon_allowed' _ "$ROOT/bin/fm-afk-launch.sh" 2>&1
+  }
+
+  # Without config/supervision-host: daemon allowed
+  daemon_allowed >/dev/null || fail "agy home without config/supervision-host must allow away daemon"
+
+  # With config/supervision-host: away mode refuses daemon
+  touch "$home/config/supervision-host"
+  local out rc=0
+  out=$(daemon_allowed) || rc=$?
+  [ "$rc" -ne 0 ] || fail "opted-in agy home must refuse away daemon"
+  assert_contains "$out" "not launched on this agy home, which runs the supervision host" \
+    "refusal message must name agy and supervision host"
+
+  # Quiet mode exception: daemon still allowed
+  daemon_allowed quiet >/dev/null || fail "quiet mode must still launch daemon on opted-in agy home"
+
+  pass "fm-afk-launch.sh: agy with supervision-host refuses away daemon but allows quiet mode"
+}
+
 test_agents_hooks_json_structure
 test_supervision_instructions_for_agy
 test_session_lock_ownership_with_agy
 test_sessionstart_agy_adapter
 test_pretool_check_agy_adapter
 test_turnend_guard_agy_adapter
+test_supervision_host_afk_refusal_and_quiet_mode_for_agy
 
 echo "# all fm-agy-primary tests passed"

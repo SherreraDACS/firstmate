@@ -172,10 +172,45 @@ test_real_host_checkpoint_ends_quietly_at_its_bound() {
   pass "checkpoint: the real host ends its park at the checkpoint bound as a quiet checkpoint"
 }
 
+test_host_checkpoint_agy_bounds_and_primary_pin() {
+  local home
+  home=$(make_host_home host-agy)
+
+  # 1. Attended default bounds and primary pin
+  FM_TEST_SEAM=1 FM_TEST_HARNESS=agy FM_AGY_WATCH_CHECKPOINT=55 FM_CODEX_WATCH_CHECKPOINT=111 \
+    run_host_checkpoint "$home" boundary
+  expect_code 124 "$STATUS" "agy attended checkpoint exit"
+  assert_contains "$(cat "$home/host-env")" $'args=park\nprimary=agy\npark=55' \
+    "agy attended checkpoint must use FM_AGY_WATCH_CHECKPOINT and pin primary=agy"
+
+  FM_TEST_SEAM=1 FM_TEST_HARNESS=codex FM_AGY_WATCH_CHECKPOINT=55 FM_CODEX_WATCH_CHECKPOINT=111 \
+    run_host_checkpoint "$home" boundary
+  expect_code 124 "$STATUS" "codex attended checkpoint exit"
+  assert_contains "$(cat "$home/host-env")" $'args=park\nprimary=codex\npark=111' \
+    "codex attended checkpoint must use FM_CODEX_WATCH_CHECKPOINT and pin primary=codex"
+
+  # 2. Away bounds and primary pin
+  : > "$home/state/.afk-contract"
+  FM_TEST_SEAM=1 FM_TEST_HARNESS=agy FM_AGY_WATCH_CHECKPOINT_AWAY=750 FM_CODEX_WATCH_CHECKPOINT_AWAY=2000 \
+    run_host_checkpoint "$home" boundary --seconds 5
+  expect_code 124 "$STATUS" "agy away checkpoint exit"
+  assert_contains "$(cat "$home/host-env")" $'args=park\nprimary=agy\npark=750' \
+    "agy away checkpoint must use FM_AGY_WATCH_CHECKPOINT_AWAY and pin primary=agy"
+
+  FM_TEST_SEAM=1 FM_TEST_HARNESS=codex FM_AGY_WATCH_CHECKPOINT_AWAY=750 FM_CODEX_WATCH_CHECKPOINT_AWAY=2000 \
+    run_host_checkpoint "$home" boundary --seconds 5
+  expect_code 124 "$STATUS" "codex away checkpoint exit"
+  assert_contains "$(cat "$home/host-env")" $'args=park\nprimary=codex\npark=2000' \
+    "codex away checkpoint must use FM_CODEX_WATCH_CHECKPOINT_AWAY and pin primary=codex"
+
+  pass "checkpoint: distinct AGY vs Codex checkpoint bounds and primary pin honored"
+}
+
 test_quiet_checkpoint_exits_124_cleanly
 test_signal_passes_through_and_exits_zero
 test_registered_check_uses_preserved_watcher_environment
 test_existing_singleton_watcher_is_not_success
 test_host_checkpoint_bounds_the_park_by_posture
+test_host_checkpoint_agy_bounds_and_primary_pin
 test_host_checkpoint_passes_a_handback_and_reports_a_stand_down
 test_real_host_checkpoint_ends_quietly_at_its_bound

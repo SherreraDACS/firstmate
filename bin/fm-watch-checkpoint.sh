@@ -8,7 +8,8 @@
 # as the host's park boundary; the host takes away-posture wakes itself and
 # returns only when main is needed (its header owns the output read here).
 # While the away-posture record state/.afk-contract exists, the bound is
-# raised to FM_CODEX_WATCH_CHECKPOINT_AWAY (default 3600) when that is longer,
+# raised to FM_AGY_WATCH_CHECKPOINT_AWAY for AGY (default 3600) or
+# FM_CODEX_WATCH_CHECKPOINT_AWAY for Codex (default 3600) when that is longer,
 # so a parked main is not woken every few minutes; an engine turn that starts
 # before the bound may finish after it. A close that carries a wake or a
 # "supervision-host:" line other than the park boundary passes through as a
@@ -21,7 +22,39 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
-SECONDS_ARG=${FM_CODEX_WATCH_CHECKPOINT:-180}
+
+fm_watch_checkpoint_harness() {
+  if [ -n "${FM_CHECKPOINT_HARNESS:-}" ]; then
+    printf '%s\n' "$FM_CHECKPOINT_HARNESS"
+    return
+  fi
+  if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_TEST_HARNESS:-}" ]; then
+    case "$FM_TEST_HARNESS" in
+      claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | unknown)
+        printf '%s\n' "$FM_TEST_HARNESS"
+        return
+        ;;
+    esac
+  fi
+  local detected
+  detected=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || printf codex)
+  case "$detected" in
+    agy) printf 'agy\n' ;;
+    *)   printf 'codex\n' ;;
+  esac
+}
+
+HARNESS=$(fm_watch_checkpoint_harness)
+case "$HARNESS" in
+  agy)
+    SECONDS_ARG=${FM_AGY_WATCH_CHECKPOINT:-180}
+    HOST_PRIMARY=agy
+    ;;
+  *)
+    SECONDS_ARG=${FM_CODEX_WATCH_CHECKPOINT:-180}
+    HOST_PRIMARY=codex
+    ;;
+esac
 
 usage() {
   cat <<'EOF'
@@ -114,7 +147,10 @@ positive_or() {  # <value> <default>
 if [ -f "$CONFIG/supervision-host" ]; then
   BOUND=$SECONDS_ARG
   if [ -f "$STATE/.afk-contract" ]; then
-    AWAY_BOUND=$(positive_or "${FM_CODEX_WATCH_CHECKPOINT_AWAY:-}" 3600)
+    case "$HARNESS" in
+      agy) AWAY_BOUND=$(positive_or "${FM_AGY_WATCH_CHECKPOINT_AWAY:-}" 3600) ;;
+      *)   AWAY_BOUND=$(positive_or "${FM_CODEX_WATCH_CHECKPOINT_AWAY:-}" 3600) ;;
+    esac
     [ "$AWAY_BOUND" -le "$BOUND" ] 2>/dev/null || BOUND=$AWAY_BOUND
   fi
   # The host's park boundary stays below the 28800-second registration.
@@ -123,7 +159,7 @@ if [ -f "$CONFIG/supervision-host" ]; then
   set +e
   # The host ends its own park; the outer bound only catches a host that
   # outlived every one of its own bounds.
-  FM_SUPERVISION_HOST_PRIMARY=codex FM_SUPERVISION_HOST_PARK_SECONDS=$BOUND FM_SUPERVISION_HOST_PARK_LIMIT=$LIMIT \
+  FM_SUPERVISION_HOST_PRIMARY=${FM_SUPERVISION_HOST_PRIMARY:-$HOST_PRIMARY} FM_SUPERVISION_HOST_PARK_SECONDS=$BOUND FM_SUPERVISION_HOST_PARK_LIMIT=$LIMIT \
     run_bounded $((LIMIT + 120)) "$SCRIPT_DIR/fm-supervision-host.sh" park >"$OUT" 2>"$ERR"
   RC=$?
   set -e

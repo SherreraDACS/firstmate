@@ -115,7 +115,7 @@ case "$HARNESS" in
 esac
 
 case "$HARNESS" in
-  agy) checkpoint_seconds=${FM_AGY_WATCH_CHECKPOINT:-${FM_CODEX_WATCH_CHECKPOINT:-180}} ;;
+  agy) checkpoint_seconds=${FM_AGY_WATCH_CHECKPOINT:-180} ;;
   *) checkpoint_seconds=${FM_CODEX_WATCH_CHECKPOINT:-180} ;;
 esac
 pi_ext="$FM_ROOT/.pi/extensions/fm-primary-pi-watch.ts"

@@ -174,7 +174,7 @@ AGY exposes native lifecycle hooks configured in `.agents/hooks.json` that execu
 
 Supervision wait protocol:
 - Documented in `docs/supervision-protocols/agy.md`.
-- Uses the foreground checkpoint model: `bin/fm-watch-checkpoint.sh --seconds "${FM_AGY_WATCH_CHECKPOINT:-${FM_CODEX_WATCH_CHECKPOINT:-180}}"`.
+- Uses the foreground checkpoint model: `bin/fm-watch-checkpoint.sh --seconds "${FM_AGY_WATCH_CHECKPOINT:-180}"`.
 - Drains queued wakes, takes the checkpoint, and handles wakes without backgrounding.
 
 ## What is still unproven

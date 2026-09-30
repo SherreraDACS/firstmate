@@ -222,15 +222,15 @@ It judges this when the close arrives and again just before the turn starts.
 When it declines such a turn, that close reaches main ahead of the boundary line instead, and its wake stays durable in the queue.
 One short main turn per boundary is the cost of never losing the park silently.
 
-### Codex checkpoint bound
+### Codex and AGY checkpoint bounds
 
-Codex has no asynchronous wake, so its checkpoint's own bound is the park.
+Codex and AGY have no asynchronous wake, so each foreground checkpoint's own bound is the park.
 The checkpoint passes it as the boundary and reports the boundary as its ordinary quiet line (`checkpoint: no actionable wake within <n>s`).
 
 | Posture | Checkpoint bound |
 |---|---|
-| Attended | `FM_CODEX_WATCH_CHECKPOINT` (default 180 seconds). |
-| Away record exists | Raised to `FM_CODEX_WATCH_CHECKPOINT_AWAY` (default 3,600) if longer, then capped at 27,000 seconds so a parked main is not woken every few minutes. |
+| Attended | `FM_CODEX_WATCH_CHECKPOINT` for Codex, or `FM_AGY_WATCH_CHECKPOINT` for AGY (default 180 seconds). |
+| Away record exists | Raised to `FM_CODEX_WATCH_CHECKPOINT_AWAY` for Codex, or `FM_AGY_WATCH_CHECKPOINT_AWAY` for AGY (default 3,600) if longer, then capped at 27,000 seconds so a parked main is not woken every few minutes. |
 
 Because that bound is not a harness timeout, the checkpoint also sets `FM_SUPERVISION_HOST_PARK_LIMIT`.
 That setting lets an engine turn that starts before the boundary finish after it.
